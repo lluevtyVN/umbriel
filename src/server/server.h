@@ -118,6 +118,8 @@ namespace umbriel {
   // game/network loop on the frame callback stalls. A suspended view gets none: clients such as Firefox detect
   // occlusion only from a long callback gap, and a slow tick reads as a slow display that drops video frames.
   inline constexpr int kBackgroundFrameIntervalMs = 100;
+  inline constexpr int kHeadlessProbeIntervalMs = 1000;
+  inline constexpr std::chrono::milliseconds kInputProbeCooldown{500};
   // Longest windows_resize.wait_for_redraw holds a reflow for its clients before it switches without them.
   inline constexpr double kRedrawWaitMs = 150.0;
   // Longest a held close snapshot stays: a safety net well past kRedrawWaitMs, released by the switch before then.
@@ -513,6 +515,8 @@ namespace umbriel {
     // outputs that were powered off through a DPMS action.
     void notifyIdleActivity();
     void notifyInputActivity();
+    void onInputActivity();
+    void triggerActiveDrmRescan();
     // Input wake applies only when every configured output is powered off. A named DPMS action therefore remains in
     // effect while another configured output is still awake.
     void wakeDpmsOutputs();
@@ -619,6 +623,9 @@ namespace umbriel {
     // when there are none.
     void armBackgroundRenderTimer();
     static int onStartupRulesTimer(void* data);
+    void startHeadlessProbeTimer();
+    void stopHeadlessProbeTimer();
+    static int onHeadlessProbeTimer(void* data);
     static int onTerminateSignal(int signal, void* data);
     static void onLayerKeyboardFocusChange(wl_listener* listener, void* data);
     static void onDisplacedRestoreIdle(void* data);
@@ -983,6 +990,8 @@ namespace umbriel {
     std::string m_pendingInputName;
     std::unordered_set<std::string> m_allowedInputNames;
     std::unordered_set<std::string> m_deniedInputNames;
+    wl_event_source* m_headlessProbeTimer = nullptr;
+    std::chrono::steady_clock::time_point m_lastInputProbeTime{};
     wl_event_source* m_backgroundFrameTimer = nullptr;
     // Paces hidden `background_render` windows at their output's refresh rate; disarmed while none is hidden.
     wl_event_source* m_backgroundRenderTimer = nullptr;

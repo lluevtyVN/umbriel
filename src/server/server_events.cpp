@@ -1293,6 +1293,7 @@ namespace umbriel {
   void Server::onNewOutput(wl_listener* listener, void* data) {
     Server* self;
     self = wl_container_of(listener, self, m_newOutput);
+    self->stopHeadlessProbeTimer();
     self->addOutput(static_cast<wlr_output*>(data));
   }
 
@@ -2018,9 +2019,59 @@ namespace umbriel {
     wlr_idle_notifier_v1_set_inhibited(m_idleNotifier, inhibited);
   }
 
+  void Server::triggerActiveDrmRescan() {
+    if (m_backendManager != nullptr) {
+      m_backendManager->rescanDrmConnectors();
+    }
+  }
+
+  int Server::onHeadlessProbeTimer(void* data) {
+    auto* self = static_cast<Server*>(data);
+    if (!self->m_outputs.empty()) {
+      self->stopHeadlessProbeTimer();
+      return 0;
+    }
+    self->triggerActiveDrmRescan();
+    if (!self->m_outputs.empty()) {
+      self->stopHeadlessProbeTimer();
+      return 0;
+    }
+    if (self->m_headlessProbeTimer != nullptr) {
+      wl_event_source_timer_update(self->m_headlessProbeTimer, kHeadlessProbeIntervalMs);
+    }
+    return 0;
+  }
+
+  void Server::startHeadlessProbeTimer() {
+    if (m_headlessProbeTimer == nullptr) {
+      wl_event_loop* loop = wl_display_get_event_loop(m_display);
+      m_headlessProbeTimer = wl_event_loop_add_timer(loop, onHeadlessProbeTimer, this);
+    }
+    if (m_headlessProbeTimer != nullptr) {
+      wl_event_source_timer_update(m_headlessProbeTimer, kHeadlessProbeIntervalMs);
+    }
+  }
+
+  void Server::stopHeadlessProbeTimer() {
+    if (m_headlessProbeTimer != nullptr) {
+      wl_event_source_timer_update(m_headlessProbeTimer, 0);
+    }
+  }
+
+  void Server::onInputActivity() {
+    if (m_outputs.empty()) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now - m_lastInputProbeTime >= kInputProbeCooldown) {
+        m_lastInputProbeTime = now;
+        triggerActiveDrmRescan();
+      }
+    }
+  }
+
   void Server::notifyIdleActivity() { wlr_idle_notifier_v1_notify_activity(m_idleNotifier, m_seat->wlr()); }
 
   void Server::notifyInputActivity() {
+    onInputActivity();
     wakeDpmsOutputs();
     notifyIdleActivity();
   }
@@ -2181,6 +2232,7 @@ namespace umbriel {
   void Server::raiseLockTree() { wlr_scene_node_raise_to_top(&m_lockTree->node); }
 
   void Server::addOutput(wlr_output* output) {
+    stopHeadlessProbeTimer();
     if (output->non_desktop) {
       if (m_drmLeaseManager == nullptr || !m_drmLeaseManager->offerOutput(output)) {
         kLog.warn("non-desktop output {} is unavailable for DRM leasing", output->name);
@@ -2822,6 +2874,9 @@ namespace umbriel {
       m_sessionLock->forgetOutput(output->wlr());
     }
     std::erase_if(m_outputs, [output](const std::unique_ptr<Output>& entry) { return entry.get() == output; });
+    if (m_outputs.empty()) {
+      startHeadlessProbeTimer();
+    }
     if (hadRuntimeEffect && !m_stopping) {
       m_effects.prepare(m_renderer);
     }

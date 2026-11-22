@@ -17,12 +17,14 @@
 #include <chrono>
 #include <cstring>
 #include <expected>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <libudev.h>
 #include <string>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <unistd.h>
 #include <vector>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -325,6 +327,65 @@ namespace umbriel {
     void markStarted() {
 #if UMBRIEL_HAS_NATIVE_DRM_POLICY
       m_started = true;
+#endif
+    }
+
+    void rescanDrmConnectors() {
+#if UMBRIEL_HAS_NATIVE_DRM_POLICY
+      if (m_session == nullptr || !m_session->active) {
+        return;
+      }
+
+      auto probeFd = [](int fd) {
+        if (fd < 0) {
+          return;
+        }
+        drmModeRes* res = drmModeGetResources(fd);
+        if (res != nullptr) {
+          for (int i = 0; i < res->count_connectors; ++i) {
+            drmModeConnector* conn = drmModeGetConnector(fd, res->connectors[i]);
+            if (conn != nullptr) {
+              drmModeFreeConnector(conn);
+            }
+          }
+          drmModeFreeResources(res);
+        }
+        close(fd);
+      };
+
+      if (!m_drmBackends.empty()) {
+        for (const auto& record : m_drmBackends) {
+          if (!record || record->backend == nullptr) {
+            continue;
+          }
+          int fd = open(record->identity.node.c_str(), O_RDWR | O_CLOEXEC);
+          if (fd < 0) {
+            fd = wlr_drm_backend_get_non_master_fd(record->backend);
+          }
+          probeFd(fd);
+        }
+      } else if (m_backend != nullptr) {
+        auto probeBackend = [&](wlr_backend* backend) {
+          if (!wlr_backend_is_drm(backend)) {
+            return;
+          }
+          int fd = wlr_drm_backend_get_non_master_fd(backend);
+          probeFd(fd);
+        };
+
+        if (wlr_backend_is_multi(m_backend)) {
+          wlr_multi_for_each_backend(
+              m_backend,
+              [](wlr_backend* backend, void* data) {
+                auto* cb = static_cast<decltype(probeBackend)*>(data);
+                (*cb)(backend);
+              },
+              &probeBackend
+          );
+        } else if (wlr_backend_is_drm(m_backend)) {
+          probeBackend(m_backend);
+        }
+      }
 #endif
     }
 
@@ -920,5 +981,7 @@ namespace umbriel {
   void BackendManager::setDrmBackendRemovedHandler(std::function<void(const wlr_backend*)> handler) {
     m_impl->setDrmBackendRemovedHandler(std::move(handler));
   }
+
+  void BackendManager::rescanDrmConnectors() { m_impl->rescanDrmConnectors(); }
 
 } // namespace umbriel

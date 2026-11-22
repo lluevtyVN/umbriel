@@ -1172,6 +1172,10 @@ namespace umbriel {
     m_gestures.reset();
     m_cursor.reset();
 
+    if (m_headlessProbeTimer != nullptr) {
+      wl_event_source_remove(m_headlessProbeTimer);
+      m_headlessProbeTimer = nullptr;
+    }
     if (m_backgroundFrameTimer != nullptr) {
       wl_event_source_remove(m_backgroundFrameTimer);
       m_backgroundFrameTimer = nullptr;
@@ -1268,6 +1272,9 @@ namespace umbriel {
       return false;
     }
     m_backendManager->markStarted();
+    if (m_outputs.empty()) {
+      startHeadlessProbeTimer();
+    }
 
     // Move the mouse cursor to the first output with "focus_at_startup" enabled, if any.
     for (const auto& output : m_outputs) {

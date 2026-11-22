@@ -28,6 +28,7 @@ namespace umbriel {
     [[nodiscard]] bool verifyOpenDevices(std::string_view context);
     void markStarted();
     void setDrmBackendRemovedHandler(std::function<void(const wlr_backend*)> handler);
+    void rescanDrmConnectors();
 
   private:
     class Impl;

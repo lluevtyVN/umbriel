@@ -366,6 +366,9 @@ namespace umbriel {
     auto* event = static_cast<wlr_keyboard_key_event*>(data);
     const bool freshPress =
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED ? m_pressedKeycodes.insert(event->keycode).second : false;
+    if (freshPress) {
+      m_server->onInputActivity();
+    }
     if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED) {
       m_pressedKeycodes.erase(event->keycode);
     }
